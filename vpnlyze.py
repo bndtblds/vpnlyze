@@ -245,10 +245,10 @@ def set_end_reason(session: Session, reason: str, details: Optional[str] = None)
     
     Priorität (niedrig→hoch):
         0: unknown
-        1: connection_reset
+        1: connection_reset, sigusr1_connection_reset
         2: client_disconnect  
-        3: timeout
-        4: tls_error
+        3: timeout, sigusr1_ping_restart
+        4: tls_error, sigusr1_tls_error
         5: bad_packet_length
         6: auth_failed (höchste Priorität)
     

@@ -113,8 +113,9 @@ vpnlyze /var/log/openvpn.log session --key 192.0.2.1:5000
 ```
 
 Hinweis: `IP:Port` ist nicht garantiert eindeutig, weil Clients Source-Ports
-spaeter erneut verwenden koennen. Fuer genaue Detailansichten ist die
-Session-ID aus `summary` vorzuziehen.
+spaeter erneut verwenden koennen. Wenn ein Key mehrfach vorkommt, bricht
+`session --key` mit einer Liste passender Session-IDs ab. Fuer genaue
+Detailansichten ist `session --id` vorzuziehen.
 
 ### 5. Session in Datei exportieren
 
@@ -154,6 +155,7 @@ vpnlyze /var/log/openvpn.log session --id 1 --output session_1.log
 | **unknown** | Beendigung nicht ermittelt |
 
 > Wenn mehrere Grunde erkannt werden, gewinnt der mit der hochsten Prioritat. `auth_failed` uberschreibt also z. B. `connection_reset`.
+> `sigusr1_connection_reset`, `sigusr1_ping_restart` und `sigusr1_tls_error` folgen derselben Prioritaet wie ihre jeweiligen Basisgruende.
 
 ---
 
@@ -252,6 +254,7 @@ vpnlyze.py
 ├── Ausgabe
 │   ├── print_summary()
 │   ├── print_session()
+│   ├── find_sessions_by_key()
 │   └── find_session()
 ├── CLI
 │   ├── build_arg_parser()
