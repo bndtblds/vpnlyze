@@ -6,21 +6,21 @@ VPNlyze - OpenVPN Session Analyzer
 Copyright (c) 2026 bndtblds
 Licensed under the MIT License.
 
-Ein Python-Tool zur Analyse von OpenVPN Syslog-Dateien (openvpn.log).
-Parser extrahiert Sessions, Auth-Ergebnisse und Beendigungsgründe.
+Analyze OpenVPN syslog files and extract sessions, authentication results,
+end reasons, and durations.
 
-Anwendung:
+Usage:
   vpnlyze <logfile> summary [--user USER] [--show-unknown]
   vpnlyze <logfile> session --id <ID> [--output file]
   vpnlyze <logfile> session --key <IP:PORT>
 
 Features:
-  - Sessions automatisch aus Logdatei extrahieren
-  - Session-Dauer berechnen (HH:MM:SS)
-  - Auth-Ergebnisse tracking (success/failed)
-  - Beendigungsgründe erkennen (timeout, auth_failed, etc.)
-  - Einzelne Sessions komplett inspizieren
-  - Nach User filtern
+  - Extract sessions from OpenVPN log files
+  - Calculate session duration (HH:MM:SS)
+  - Track authentication result (success/failed/unknown)
+  - Detect end reasons (timeout, auth_failed, TLS errors, etc.)
+  - Inspect or export one complete session
+  - Filter by username
 """
 
 import argparse
@@ -37,28 +37,28 @@ __license__ = "MIT"
 
 
 # ============================================================================
-# DATENMODELL: Session Class
+# DATA MODEL: Session class
 # ============================================================================
 
 @dataclass
 class Session:
-    """Repräsentiert eine OpenVPN-Session (VPN-Verbindung).
+    """Represents one OpenVPN session.
     
-    Attribute:
-        session_id: Eindeutige Nummer (Reihenfolge der Entdeckung)
-        key: IP:PORT Kombination der Verbindung (nicht global eindeutig)
-        ip: Client IP-Adresse
-        port: Client Port
-        user: Benutzername der Session
-        cn: Certificate Name (aus TLS Handshake)
-        auth_result: Authentifizierungsergebnis (success/failed/unknown)
-        end_reason: Grund der Sitzungsbeendigung (timeout, reset, etc.)
-        end_details: Zusätzliche Details zum Beendigungsgrund
-        start_ts: Erste Logzeile (YYYY:MM:DD-HH:MM:SS)
-        end_ts: Letzte Logzeile (YYYY:MM:DD-HH:MM:SS)
-        start_line_no: Erste Zeilennummer in Logdatei
-        end_line_no: Letzte Zeilennummer in Logdatei
-        lines: Alle Original-Logzeilen dieser Session
+    Attributes:
+        session_id: Unique number in discovery order
+        key: IP:PORT display key for the connection, not globally unique
+        ip: Client IP address
+        port: Client source port
+        user: Session username
+        cn: Certificate name from the TLS handshake
+        auth_result: Authentication result (success/failed/unknown)
+        end_reason: Session end reason (timeout, reset, etc.)
+        end_details: Additional end reason details
+        start_ts: First assigned log timestamp (YYYY:MM:DD-HH:MM:SS)
+        end_ts: Last assigned log timestamp (YYYY:MM:DD-HH:MM:SS)
+        start_line_no: First assigned source line number
+        end_line_no: Last assigned source line number
+        lines: Original log lines assigned to this session
     """
     session_id: int
     key: str
@@ -67,7 +67,7 @@ class Session:
     user: Optional[str] = None
     cn: Optional[str] = None
     auth_result: str = "unknown"    # success | failed | unknown
-    end_reason: str = "unknown"     # siehe set_end_reason() für Prioritäten
+    end_reason: str = "unknown"     # See set_end_reason() for priorities.
     end_details: Optional[str] = None
     start_ts: Optional[str] = None
     end_ts: Optional[str] = None
@@ -77,9 +77,9 @@ class Session:
 
 
 # ============================================================================
-# REGEX PATTERNS: Logzeilen-Erkennung
+# REGEX PATTERNS: log line detection
 # ============================================================================
-# Diese Patterns erkennen verschiedene OpenVPN-Ereignisse in Syslog-Zeilen.
+# These patterns detect OpenVPN events in syslog lines.
 # Format: YYYY:MM:DD-HH:MM:SS ... openvpn[PID]: <Event-Details>
 
 RE_IP = r'(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]+)'
@@ -94,73 +94,73 @@ RE_IP_PORT_AT_START = re.compile(
     rf'^{RE_ENDPOINT}'
 )
 
-# TCP-Handshake Start
+# TCP handshake start
 RE_TCP_ESTABLISHED = re.compile(
     rf'TCP connection established with {RE_AF_ENDPOINT}'
 )
 
-# TLS Handshake abgeschlossen, CN erkannt
+# TLS handshake complete, CN detected
 RE_PEER_INITIATED = re.compile(
     rf'\[(?P<cn>[^\]]+)\] Peer Connection Initiated with {RE_AF_ENDPOINT}'
 )
 
-# Passwort-Authentifizierung angefordert
+# Username/password authentication requested
 RE_AUTH_DEFERRED = re.compile(
     rf"{RE_ENDPOINT}.*?Username/Password authentication deferred for username '(?P<user>[^']+)'"
 )
 
-# Erfolgreiches Login erkannt
+# Successful login event
 RE_CONNECTION_STARTED = re.compile(
     r'event="Connection started".*?username="(?P<user>[^"]+)".*?srcip="(?P<ip>[^"]+)"'
 )
 
-# User/IP:Port Kombination
+# User/IP:Port combination
 RE_USER_IP_PORT = re.compile(
     rf'^(?P<user>[^/\s]+)/{RE_ENDPOINT}'
 )
 
-# Authentifizierung fehlgeschlagen
+# Authentication failed
 RE_AUTH_FAILED = re.compile(
     rf"{RE_ENDPOINT}.*?SENT CONTROL \[(?P<user>[^\]]+)\]: 'AUTH_FAILED'"
 )
 
-# Verbindung zurückgesetzt
+# Connection reset
 RE_CONN_RESET = re.compile(
     rf'{RE_ENDPOINT}.*?Connection reset'
 )
 
-# Signal SIGUSR1 empfangen (Neustart/Neuladen)
+# SIGUSR1 received (restart/reload)
 RE_SIGUSR1 = re.compile(
     rf'{RE_ENDPOINT}.*?SIGUSR1\[soft,(?P<reason>[^\]]+)\]'
 )
 
-# Timeout durch Inaktivität
+# Inactivity timeout
 RE_INACTIVITY = re.compile(
     rf'{RE_ENDPOINT}.*?Inactivity timeout'
 )
 
-# Client disconnect (explizit)
+# Explicit client disconnect
 RE_EXPLICIT_EXIT = re.compile(
     rf'{RE_ENDPOINT}.*?(Connection, Client disconnected|client-instance exiting)'
 )
 
-# TLS/SSL Fehler
+# TLS/SSL error
 RE_TLS_ERROR = re.compile(
     rf'{RE_ENDPOINT}.*?TLS Error'
 )
 
-# Paketlängen-Fehler (meist Netzwerkprobleme)
+# Packet length error, often caused by network issues
 RE_BAD_PACKET_LENGTH = re.compile(
     rf'{RE_ENDPOINT}.*?Bad encapsulated packet length'
 )
 
 
 # ============================================================================
-# HILFSFUNKTIONEN
+# HELPERS
 # ============================================================================
 
 def make_key(ip: str, port: str) -> str:
-    """Erstellt den IP:Port-Anzeigeschlüssel einer Verbindung."""
+    """Build the IP:Port display key for a connection."""
     return f"{ip}:{port}"
 
 
@@ -169,15 +169,15 @@ def create_session(
     ip: str,
     port: str,
 ) -> Session:
-    """Erstellt eine neue Session-Instanz.
+    """Create a new session instance.
     
     Args:
-        sessions_in_order: Liste zur Erhaltung der Reihenfolge
-        ip: Client IP-Adresse
-        port: Client Port
+        sessions_in_order: List preserving discovery order
+        ip: Client IP address
+        port: Client source port
     
     Returns:
-        Neu erstelltes Session-Objekt
+        Newly created session object
     """
     sess = Session(
         session_id=len(sessions_in_order) + 1,
@@ -195,7 +195,7 @@ def get_active_session(
     ip: str,
     port: str,
 ) -> Session:
-    """Findet die aktuell aktive Session nach IP:Port oder erstellt eine neue.
+    """Find the currently active session by IP:Port or create a new one.
     
     TCP source ports can be reused later in the same log file. Therefore a TCP
     connection start always creates a new session, while follow-up events use the
@@ -208,7 +208,7 @@ def get_active_session(
 
 
 def is_pending_login_candidate(session: Session, ip: str, user: str) -> bool:
-    """Prüft, ob eine Session für ein portloses Login-Event plausibel ist."""
+    """Return whether a session is plausible for a portless login event."""
     if session.ip != ip:
         return False
     if session.auth_result == "success" or session.end_reason != "unknown":
@@ -223,14 +223,14 @@ def attach_line(
     line_no: int,
     store_line: bool = True,
 ) -> None:
-    """Fügt Logzeile zu Session hinzu und aktualisiert Timestamps.
+    """Attach a log line to a session and update timestamps.
     
     Args:
-        session: Session-Objekt
-        line: Original-Logzeile
-        ts: Timestamp aus Logzeile
-        line_no: Zeilennummer in Datei
-        store_line: Originalzeile speichern (für Detailansicht/Export)
+        session: Session object
+        line: Original log line
+        ts: Timestamp from the log line
+        line_no: Source file line number
+        store_line: Store original line for detail view/export
     """
     if session.start_ts is None:
         session.start_ts = ts
@@ -242,24 +242,24 @@ def attach_line(
 
 
 def set_end_reason(session: Session, reason: str, details: Optional[str] = None) -> None:
-    """Setzt Beendigungsgrund mit Prioritäten-Prüfung.
+    """Set end reason while respecting priority.
     
-    Verhindert, dass unwichtige Gründe (z.B. connection_reset) wichtigere
-    Gründe (z.B. auth_failed) überschreiben.
+    Prevents low-value reasons (for example connection_reset) from overwriting
+    higher-value reasons (for example auth_failed).
     
-    Priorität (niedrig→hoch):
+    Priority from low to high:
         0: unknown
         1: connection_reset, sigusr1_connection_reset
         2: client_disconnect  
         3: timeout, sigusr1_ping_restart
         4: tls_error, sigusr1_tls_error
         5: bad_packet_length
-        6: auth_failed (höchste Priorität)
+        6: auth_failed (highest priority)
     
     Args:
-        session: Session-Objekt
-        reason: Neuer Beendigungsgrund
-        details: Optionale Zusatzinformation
+        session: Session object
+        reason: New end reason
+        details: Optional additional details
     """
     priority = {
         "unknown": 0,
@@ -283,16 +283,16 @@ def set_end_reason(session: Session, reason: str, details: Optional[str] = None)
 
 
 def calculate_duration(start_ts: Optional[str], end_ts: Optional[str]) -> str:
-    """Berechnet Session-Dauer zwischen zwei Timestamps.
+    """Calculate session duration between two timestamps.
     
     Args:
-        start_ts: Start-Timestamp (Format: YYYY:MM:DD-HH:MM:SS)
-        end_ts: End-Timestamp (Format: YYYY:MM:DD-HH:MM:SS)
+        start_ts: Start timestamp (format: YYYY:MM:DD-HH:MM:SS)
+        end_ts: End timestamp (format: YYYY:MM:DD-HH:MM:SS)
     
     Returns:
-        Formatierte Dauer als HH:MM:SS oder "-" wenn nicht berechenbar.
+        Formatted duration as HH:MM:SS, or "-" if unavailable.
     
-    Beispiele:
+    Example:
         calculate_duration("2025:04:21-10:00:00", "2025:04:21-10:30:45")
         → "00:30:45"
     """
@@ -308,7 +308,7 @@ def calculate_duration(start_ts: Optional[str], end_ts: Optional[str]) -> str:
         total_seconds = int(delta.total_seconds())
         
         if total_seconds < 0:
-            return "-"  # End vor Start sollte nicht vorkommen
+            return "-"  # End before start should not happen.
         
         hours = total_seconds // 3600
         minutes = (total_seconds % 3600) // 60
@@ -316,11 +316,11 @@ def calculate_duration(start_ts: Optional[str], end_ts: Optional[str]) -> str:
         
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     except (ValueError, Exception):
-        return "-"  # Fallback bei ungültigem Format
+        return "-"  # Fallback for invalid timestamp formats.
 
 
 # ============================================================================
-# LOG PARSER: Hauptanalyse-Funktion
+# LOG PARSER
 # ============================================================================
 
 def parse_log(
@@ -328,24 +328,24 @@ def parse_log(
     store_lines: bool = True,
     store_session_ids: Optional[Set[int]] = None,
 ) -> List[Session]:
-    """Parst OpenVPN Syslog-Datei und extrahiert alle Sessions.
+    """Parse an OpenVPN syslog file and extract all sessions.
     
-    Liest Logdatei zeilenweise, erkennt OpenVPN-Events per Regex,
-    erstellt Session-Objekte mit Metadata (User, Auth, End-Reason, etc.).
+    Reads the log file line by line, detects OpenVPN events via regex, and
+    creates session objects with metadata (user, auth result, end reason, etc.).
     
     Args:
-        path: Pfad zur openvpn.log Datei
-        store_lines: Original-Logzeilen in Session-Objekten speichern
-        store_session_ids: Optional nur diese Session-IDs mit Zeilen befüllen
+        path: Path to the openvpn.log file
+        store_lines: Store original log lines in session objects
+        store_session_ids: Optional set of session IDs to store lines for
     
     Returns:
-        Liste von Session-Objekten sortiert nach Entdeckungs-Reihenfolge
+        Session objects sorted by discovery order
     
-    Verarbeitete Events:
+    Processed events:
         - TCP connection established
         - Peer Connection Initiated (CN extraction)
         - Username/Password deferred
-        - Connection started (erfolgreicher Login)
+        - Connection started (successful login)
         - AUTH_FAILED (failed login)
         - Connection reset
         - SIGUSR1 (Signal)
@@ -396,7 +396,7 @@ def parse_log(
                 )
                 touched_session.user = m.group("user")
 
-            # user/ip:port-Zeilen
+            # user/ip:port lines
             m = RE_USER_IP_PORT.search(rest)
             if m:
                 touched_session = get_active_session(
@@ -405,7 +405,7 @@ def parse_log(
                 if not touched_session.user:
                     touched_session.user = m.group("user")
 
-            # Erfolgreiche Anmeldung
+            # Successful login
             m = RE_CONNECTION_STARTED.search(rest)
             if m:
                 ip = m.group("ip")
@@ -424,7 +424,7 @@ def parse_log(
                 touched_session.user = user
                 touched_session.auth_result = "success"
 
-            # Fehlgeschlagene Anmeldung
+            # Failed login
             m = RE_AUTH_FAILED.search(rest)
             if m:
                 touched_session = get_active_session(
@@ -463,7 +463,7 @@ def parse_log(
                 )
                 set_end_reason(touched_session, "timeout")
 
-            # Expliziter Disconnect
+            # Explicit disconnect
             m = RE_EXPLICIT_EXIT.search(rest)
             if m:
                 touched_session = get_active_session(
@@ -487,7 +487,7 @@ def parse_log(
                 )
                 set_end_reason(touched_session, "bad_packet_length")
 
-            # Falls Zeile direkt mit ip:port beginnt
+            # If the line starts directly with ip:port
             if touched_session is None:
                 m = RE_IP_PORT_AT_START.match(rest)
                 if m:
@@ -506,7 +506,7 @@ def parse_log(
 
 
 # ============================================================================
-# AUSGABE: Formatierte Tabellen und Details
+# OUTPUT
 # ============================================================================
 
 def print_summary(
@@ -514,22 +514,22 @@ def print_summary(
     show_unknown: bool = False,
     user_filter: Optional[str] = None,
 ) -> None:
-    """Gibt Übersichtstabelle aller Sessions aus.
+    """Print a summary table of sessions.
     
     Args:
-        sessions: Liste von Session-Objekten
-        show_unknown: Zeige auch Sessions ohne klaren Status
-        user_filter: Filter nach bestimmtem Benutzername (case-insensitive)
+        sessions: Session objects
+        show_unknown: Also show sessions without clear status
+        user_filter: Case-insensitive username filter
     
-    Output-Spalten:
-        ID: Session-Nummer
+    Output columns:
+        ID: Session number
         Auth: success | failed | unknown
-        Ende: Beendigungsgrund
-        User: Benutzername
-        IP:Port: Client-Adresse
-        Start: Erste Logzeile (Timestamp)
-        Ende-Zeit: Letzte Logzeile (Timestamp)
-        Dauer: Berechnete Session-Dauer (HH:MM:SS)
+        End: End reason
+        User: Username
+        IP:Port: Client address
+        Start: First timestamp
+        End Time: Last timestamp
+        Duration: Calculated session duration (HH:MM:SS)
     """
     filtered = []
 
@@ -541,12 +541,12 @@ def print_summary(
         filtered.append(s)
 
     if not filtered:
-        print("Keine passenden Sessions gefunden.")
+        print("No matching sessions found.")
         return
 
     print(
-        f"{'ID':>4}  {'Auth':<8}  {'Ende':<20}  {'User':<20}  {'IP:Port':<24}  "
-        f"{'Start':<19}  {'Ende-Zeit':<19}  {'Dauer':<9}"
+        f"{'ID':>4}  {'Auth':<8}  {'End':<20}  {'User':<20}  {'IP:Port':<24}  "
+        f"{'Start':<19}  {'End Time':<19}  {'Duration':<9}"
     )
     print("-" * 135)
 
@@ -566,13 +566,13 @@ def print_summary(
 
 
 def print_session(session: Session) -> None:
-    """Gibt vollständige Session-Details mit allen Logzeilen aus.
+    """Print full session details with all original log lines.
     
     Args:
-        session: Session-Objekt
+        session: Session object
     
     Output:
-        Header mit Metadaten gefolgt von allen Original-Logzeilen.
+        Metadata header followed by all original log lines.
     """
     duration = calculate_duration(session.start_ts, session.end_ts)
     print(
@@ -584,9 +584,9 @@ def print_session(session: Session) -> None:
         f"# End Details : {session.end_details or '-'}\n"
         f"# Key         : {session.key}\n"
         f"# Start       : {session.start_ts or '-'}\n"
-        f"# Ende        : {session.end_ts or '-'}\n"
-        f"# Dauer       : {duration}\n"
-        f"# Zeilen      : {session.start_line_no or '-'} - {session.end_line_no or '-'}\n"
+        f"# End         : {session.end_ts or '-'}\n"
+        f"# Duration    : {duration}\n"
+        f"# Lines       : {session.start_line_no or '-'} - {session.end_line_no or '-'}\n"
     )
     for line in session.lines:
         print(line)
@@ -596,14 +596,14 @@ def find_session(
     sessions: List[Session],
     session_id: int,
 ) -> Optional[Session]:
-    """Sucht eine spezifische Session nach eindeutiger Session-ID.
+    """Find a specific session by unique session ID.
     
     Args:
-        sessions: Liste von Session-Objekten
-        session_id: Session-ID (von summary Command)
+        sessions: Session objects
+        session_id: Session ID from the summary command
     
     Returns:
-        Session-Objekt oder None wenn nicht gefunden
+        Session object or None if not found
     """
     for s in sessions:
         if s.session_id == session_id:
@@ -613,30 +613,30 @@ def find_session(
 
 
 def find_sessions_by_key(sessions: List[Session], key: str) -> List[Session]:
-    """Sucht alle Sessions mit einem IP:Port-Key."""
+    """Find all sessions with an IP:Port key."""
     return [s for s in sessions if s.key == key]
 
 
 # ============================================================================
-# CLI: Argument Parser und Hilfe
+# CLI
 # ============================================================================
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """Erstellt Argument Parser mit all Subcommands.
+    """Build the argument parser with all subcommands.
     
     Returns:
-        ArgumentParser-Objekt mit summary und session Subcommands
+        ArgumentParser object with summary and session subcommands
     """
     parser = argparse.ArgumentParser(
-        description="OpenVPN Log Analyzer - Parst openvpn.log und analysiert Sessions",
+        description="OpenVPN Log Analyzer - parses openvpn.log and analyzes sessions",
         formatter_class=argparse.RawTextHelpFormatter,
         add_help=False
     )
 
-    parser.add_argument("-h", "--help", action="help", help="Diese Hilfe anzeigen")
+    parser.add_argument("-h", "--help", action="help", help="Show this help message")
     parser.add_argument(
         "logfile",
-        help="Pfad zur OpenVPN Logdatei (z.B. /var/log/openvpn.log)"
+        help="Path to the OpenVPN log file, for example /var/log/openvpn.log"
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -644,68 +644,68 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # summary Command
     p_summary = subparsers.add_parser(
         "summary",
-        help="Übersichtstabelle aller erkannten Sessions"
+        help="Show a summary table of detected sessions"
     )
     p_summary.add_argument(
         "--show-unknown",
         action="store_true",
-        help="Auch Sessions ohne klaren Status anzeigen"
+        help="Show sessions without a clear status"
     )
     p_summary.add_argument(
         "--user",
-        help="Filter: nur Sessions dieses Users (case-insensitive)"
+        help="Filter by username (case-insensitive)"
     )
 
     # session Command
     p_session = subparsers.add_parser(
         "session",
-        help="Zeige alle Logzeilen einer spezifischen Session"
+        help="Show all log lines for one session"
     )
     group = p_session.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--id",
         type=int,
-        help="Session-ID aus summary Command (z.B. --id 5)"
+        help="Session ID from the summary command, for example --id 5"
     )
     group.add_argument(
         "--key",
-        help="Session Key als IP:PORT (z.B. --key 192.0.2.100:5000)"
+        help="Session key as IP:PORT, for example --key 192.0.2.100:5000"
     )
     p_session.add_argument(
         "--output",
-        help="Speichere Output in Textdatei statt stdout"
+        help="Write output to a text file instead of stdout"
     )
 
     return parser
 
 
 def print_usage_hint() -> None:
-    """Gibt Bedienungsanleitung mit Beispielen aus."""
+    """Print usage hints with examples."""
     print("""
-Nutzen Sie VPNlyze zur Analyse von OpenVPN Logdateien.
+Use VPNlyze to analyze OpenVPN log files.
 
-EINFACHE VERWENDUNG:
-  1. Zunächst Summary der Sessions abrufen:
+QUICK START:
+  1. Show the session summary:
      vpnlyze /var/log/openvpn.log summary
   
-  2. Dann spezifische Session analysieren (per ID oder IP:Port):
+  2. Inspect one session by ID or IP:Port:
      vpnlyze /var/log/openvpn.log session --id 1
      vpnlyze /var/log/openvpn.log session --key 192.0.2.100:5000
 
-ALLE BEFEHLE:
+COMMANDS:
   vpnlyze <logfile> summary [--show-unknown] [--user USER]
-    Zeige Übersichtstabelle aller Sessions
-    --show-unknown: auch Sessions ohne Status
-    --user testuser: Filter nach User
+    Show a summary table of detected sessions
+    --show-unknown: include sessions without clear status
+    --user testuser: filter by username
   
-  vpnlyze <logfile> session --id <ID> [--output datei]
-    Zeige alle Logzeilen für Session-ID
-    --output: speichere in Datei
+  vpnlyze <logfile> session --id <ID> [--output file]
+    Show all log lines for a session ID
+    --output: write to file
   
-  vpnlyze <logfile> session --key <IP:PORT> [--output datei]
-    Zeige Logzeilen für IP:PORT Kombination
+  vpnlyze <logfile> session --key <IP:PORT> [--output file]
+    Show log lines for an IP:PORT key
 
-BEISPIELE (mit anonymen Testdaten):
+EXAMPLES:
   vpnlyze /var/log/openvpn.log summary
   vpnlyze /var/log/openvpn.log summary --show-unknown
   vpnlyze /var/log/openvpn.log summary --user testuser1
@@ -713,29 +713,29 @@ BEISPIELE (mit anonymen Testdaten):
   vpnlyze /var/log/openvpn.log session --key 192.0.2.100:5000
   vpnlyze /var/log/openvpn.log session --id 42 --output session_42.log
 
-SPALTEN-ERKLÄRUNG (Summary):
-  ID       = Session-Nummer
+SUMMARY COLUMNS:
+  ID       = Session ID
   Auth     = success | failed | unknown
-  Ende     = Beendigungsgrund der Sitzung
-  User     = Benutzername
-  IP:Port  = Client-Adresse
-  Start    = Erste Logzeile (Timestamp)
-  Ende-Zeit= Letzte Logzeile (Timestamp)
-  Dauer    = Berechnete Session-Dauer (HH:MM:SS)
+  End      = Session end reason
+  User     = Username
+  IP:Port  = Client address
+  Start    = First timestamp
+  End Time = Last timestamp
+  Duration = Calculated session duration (HH:MM:SS)
 """)
 
 
 # ============================================================================
-# MAIN: Einstiegspunkt
+# MAIN
 # ============================================================================
 
 def main() -> int:
-    """Hauptprogramm - Argumente parsen, Logdatei laden, Ausgabe generieren.
+    """Parse arguments, load the log file, and generate output.
     
     Returns:
-        0: Erfolg
-        1: Fehler beim Laden/Parsing
-        2: Session nicht gefunden
+        0: Success
+        1: Loading/parsing error
+        2: Session not found or ambiguous
     """
     parser = build_arg_parser()
 
@@ -753,7 +753,7 @@ def main() -> int:
 
     log_path = Path(args.logfile)
     if not log_path.is_file():
-        print(f"Datei nicht gefunden: {log_path}", file=sys.stderr)
+        print(f"File not found: {log_path}", file=sys.stderr)
         return 1
 
     sessions = parse_log(log_path, store_lines=False)
@@ -773,8 +773,8 @@ def main() -> int:
             if len(matches) > 1:
                 ids = ", ".join(str(s.session_id) for s in matches)
                 print(
-                    f"Session-Key ist mehrdeutig: {args.key} "
-                    f"(Session-IDs: {ids}). Bitte --id verwenden.",
+                    f"Session key is ambiguous: {args.key} "
+                    f"(session IDs: {ids}). Please use --id.",
                     file=sys.stderr,
                 )
                 return 2
@@ -784,7 +784,7 @@ def main() -> int:
             sess = find_session(sessions, args.id)
 
         if not sess:
-            print("Session nicht gefunden.", file=sys.stderr)
+            print("Session not found.", file=sys.stderr)
             return 2
 
         detail_sessions = parse_log(
@@ -810,14 +810,14 @@ def main() -> int:
                     f"# End Details : {sess.end_details or '-'}\n"
                     f"# Key         : {sess.key}\n"
                     f"# Start       : {sess.start_ts or '-'}\n"
-                    f"# Ende        : {sess.end_ts or '-'}\n"
-                    f"# Dauer       : {duration}\n"
-                    f"# Zeilen      : {sess.start_line_no or '-'} - {sess.end_line_no or '-'}\n\n"
+                    f"# End         : {sess.end_ts or '-'}\n"
+                    f"# Duration    : {duration}\n"
+                    f"# Lines       : {sess.start_line_no or '-'} - {sess.end_line_no or '-'}\n\n"
                 )
                 f.write(header)
                 for line in sess.lines:
                     f.write(line + "\n")
-            print(f"Session gespeichert: {out_path}")
+            print(f"Session saved: {out_path}")
         else:
             print_session(sess)
 

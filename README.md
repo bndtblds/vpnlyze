@@ -83,7 +83,7 @@ vpnlyze /var/log/openvpn.log session --id 42 --output session_42.log
 Example:
 
 ```text
-  ID  Auth      Ende                  User                 IP:Port                   Start                Ende-Zeit            Dauer
+  ID  Auth      End                   User                 IP:Port                   Start                End Time             Duration
 ---------------------------------------------------------------------------------------------------------------------------------------
    1  success   sigusr1_ping_restart  testuser1            192.0.2.100:5000          2026:04:30-10:00:00  2026:04:30-10:30:45  00:30:45
    2  failed    auth_failed           testuser2            2001:db8::1:5001          2026:04:30-10:05:00  2026:04:30-10:05:04  00:00:04
@@ -95,12 +95,12 @@ Columns:
 |--------|---------|
 | `ID` | Session ID used with `session --id` |
 | `Auth` | `success`, `failed`, or `unknown` |
-| `Ende` | Detected end reason |
+| `End` | Detected end reason |
 | `User` | Username or `-` |
 | `IP:Port` | Client address and source port |
 | `Start` | First timestamp assigned to the session |
-| `Ende-Zeit` | Last timestamp assigned to the session |
-| `Dauer` | Duration in `HH:MM:SS` |
+| `End Time` | Last timestamp assigned to the session |
+| `Duration` | Duration in `HH:MM:SS` |
 
 Common end reasons:
 
