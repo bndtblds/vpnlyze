@@ -82,72 +82,76 @@ class Session:
 # Diese Patterns erkennen verschiedene OpenVPN-Ereignisse in Syslog-Zeilen.
 # Format: YYYY:MM:DD-HH:MM:SS ... openvpn[PID]: <Event-Details>
 
+RE_IP = r'(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]+)'
+RE_ENDPOINT = rf'(?P<ip>{RE_IP}):(?P<port>\d+)'
+RE_AF_ENDPOINT = rf'\[AF_INET6?\]{RE_ENDPOINT}'
+
 RE_LINE_PREFIX = re.compile(
     r'^(?P<ts>\d{4}:\d{2}:\d{2}-\d{2}:\d{2}:\d{2}) .*? openvpn\[\d+\]: (?P<rest>.*)$'
 )
 
 RE_IP_PORT_AT_START = re.compile(
-    r'^(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+)'
+    rf'^{RE_ENDPOINT}'
 )
 
 # TCP-Handshake Start
 RE_TCP_ESTABLISHED = re.compile(
-    r'TCP connection established with \[AF_INET\](?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+)'
+    rf'TCP connection established with {RE_AF_ENDPOINT}'
 )
 
 # TLS Handshake abgeschlossen, CN erkannt
 RE_PEER_INITIATED = re.compile(
-    r'\[(?P<cn>[^\]]+)\] Peer Connection Initiated with \[AF_INET\](?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+)'
+    rf'\[(?P<cn>[^\]]+)\] Peer Connection Initiated with {RE_AF_ENDPOINT}'
 )
 
 # Passwort-Authentifizierung angefordert
 RE_AUTH_DEFERRED = re.compile(
-    r"(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?Username/Password authentication deferred for username '(?P<user>[^']+)'"
+    rf"{RE_ENDPOINT}.*?Username/Password authentication deferred for username '(?P<user>[^']+)'"
 )
 
 # Erfolgreiches Login erkannt
 RE_CONNECTION_STARTED = re.compile(
-    r'event="Connection started".*?username="(?P<user>[^"]+)".*?srcip="(?P<ip>\d{1,3}(?:\.\d{1,3}){3})"'
+    r'event="Connection started".*?username="(?P<user>[^"]+)".*?srcip="(?P<ip>[^"]+)"'
 )
 
 # User/IP:Port Kombination
 RE_USER_IP_PORT = re.compile(
-    r'^(?P<user>[^/\s]+)/(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+)'
+    rf'^(?P<user>[^/\s]+)/{RE_ENDPOINT}'
 )
 
 # Authentifizierung fehlgeschlagen
 RE_AUTH_FAILED = re.compile(
-    r"(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?SENT CONTROL \[(?P<user>[^\]]+)\]: 'AUTH_FAILED'"
+    rf"{RE_ENDPOINT}.*?SENT CONTROL \[(?P<user>[^\]]+)\]: 'AUTH_FAILED'"
 )
 
 # Verbindung zurückgesetzt
 RE_CONN_RESET = re.compile(
-    r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?Connection reset'
+    rf'{RE_ENDPOINT}.*?Connection reset'
 )
 
 # Signal SIGUSR1 empfangen (Neustart/Neuladen)
 RE_SIGUSR1 = re.compile(
-    r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?SIGUSR1\[soft,(?P<reason>[^\]]+)\]'
+    rf'{RE_ENDPOINT}.*?SIGUSR1\[soft,(?P<reason>[^\]]+)\]'
 )
 
 # Timeout durch Inaktivität
 RE_INACTIVITY = re.compile(
-    r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?Inactivity timeout'
+    rf'{RE_ENDPOINT}.*?Inactivity timeout'
 )
 
 # Client disconnect (explizit)
 RE_EXPLICIT_EXIT = re.compile(
-    r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?(Connection, Client disconnected|client-instance exiting)'
+    rf'{RE_ENDPOINT}.*?(Connection, Client disconnected|client-instance exiting)'
 )
 
 # TLS/SSL Fehler
 RE_TLS_ERROR = re.compile(
-    r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?TLS Error'
+    rf'{RE_ENDPOINT}.*?TLS Error'
 )
 
 # Paketlängen-Fehler (meist Netzwerkprobleme)
 RE_BAD_PACKET_LENGTH = re.compile(
-    r'(?P<ip>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d+).*?Bad encapsulated packet length'
+    rf'{RE_ENDPOINT}.*?Bad encapsulated packet length'
 )
 
 

@@ -34,6 +34,24 @@ class ParserTests(unittest.TestCase):
         self.assertEqual([s.key for s in sessions], ["192.0.2.1:5000", "192.0.2.1:5000"])
         self.assertEqual([s.start_ts for s in sessions], ["2026:04:30-10:00:00", "2026:04:30-10:01:00"])
 
+    def test_ipv6_sessions_are_parsed(self):
+        sessions = parse_lines(
+            [
+                "2026:04:30-10:00:00 host openvpn[1]: TCP connection established with [AF_INET6]2001:db8::1:5000",
+                "2026:04:30-10:00:01 host openvpn[1]: [testuser1] Peer Connection Initiated with [AF_INET6]2001:db8::1:5000",
+                "2026:04:30-10:00:02 host openvpn[1]: 2001:db8::1:5000 Username/Password authentication deferred for username 'testuser1'",
+                '2026:04:30-10:00:03 host openvpn[1]: event="Connection started" username="testuser1" srcip="2001:db8::1"',
+                "2026:04:30-10:00:04 host openvpn[1]: 2001:db8::1:5000 SIGUSR1[soft,ping-restart] received, process restarting",
+            ]
+        )
+
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0].key, "2001:db8::1:5000")
+        self.assertEqual(sessions[0].ip, "2001:db8::1")
+        self.assertEqual(sessions[0].port, "5000")
+        self.assertEqual(sessions[0].auth_result, "success")
+        self.assertEqual(sessions[0].end_reason, "sigusr1_ping_restart")
+
     def test_connection_started_matches_latest_pending_session(self):
         sessions = parse_lines(
             [
