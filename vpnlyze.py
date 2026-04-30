@@ -160,34 +160,47 @@ def make_key(ip: str, port: str) -> str:
     return f"{ip}:{port}"
 
 
-def get_or_create_session(
-    sessions_by_key: Dict[str, Session],
+def create_session(
     sessions_in_order: List[Session],
     ip: str,
     port: str,
 ) -> Session:
-    """Findet Session nach IP:Port oder erstellt neue.
+    """Erstellt eine neue Session-Instanz.
     
     Args:
-        sessions_by_key: Dict zum schnellen Nachschlag nach Key
         sessions_in_order: Liste zur Erhaltung der Reihenfolge
         ip: Client IP-Adresse
         port: Client Port
     
     Returns:
-        Session-Objekt (neu oder existierend)
+        Neu erstelltes Session-Objekt
+    """
+    sess = Session(
+        session_id=len(sessions_in_order) + 1,
+        key=make_key(ip, port),
+        ip=ip,
+        port=port,
+    )
+    sessions_in_order.append(sess)
+    return sess
+
+
+def get_active_session(
+    active_sessions_by_key: Dict[str, Session],
+    sessions_in_order: List[Session],
+    ip: str,
+    port: str,
+) -> Session:
+    """Findet die aktuell aktive Session nach IP:Port oder erstellt eine neue.
+    
+    TCP source ports can be reused later in the same log file. Therefore a TCP
+    connection start always creates a new session, while follow-up events use the
+    most recent active session for the same IP:Port.
     """
     key = make_key(ip, port)
-    if key not in sessions_by_key:
-        sess = Session(
-            session_id=len(sessions_in_order) + 1,
-            key=key,
-            ip=ip,
-            port=port,
-        )
-        sessions_by_key[key] = sess
-        sessions_in_order.append(sess)
-    return sessions_by_key[key]
+    if key not in active_sessions_by_key:
+        active_sessions_by_key[key] = create_session(sessions_in_order, ip, port)
+    return active_sessions_by_key[key]
 
 
 def attach_line(session: Session, line: str, ts: str, line_no: int) -> None:
@@ -311,7 +324,7 @@ def parse_log(path: Path) -> List[Session]:
         - TLS Error
         - Bad packet length
     """
-    sessions_by_key: Dict[str, Session] = {}
+    active_sessions_by_key: Dict[str, Session] = {}
     sessions_in_order: List[Session] = []
 
     with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -330,15 +343,16 @@ def parse_log(path: Path) -> List[Session]:
             # TCP connection established
             m = RE_TCP_ESTABLISHED.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = create_session(
+                    sessions_in_order, m.group("ip"), m.group("port")
                 )
+                active_sessions_by_key[touched_session.key] = touched_session
 
             # Peer Connection Initiated + CN
             m = RE_PEER_INITIATED.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 touched_session.cn = m.group("cn")
                 if not touched_session.user:
@@ -347,16 +361,16 @@ def parse_log(path: Path) -> List[Session]:
             # Username/Password authentication deferred
             m = RE_AUTH_DEFERRED.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 touched_session.user = m.group("user")
 
             # user/ip:port-Zeilen
             m = RE_USER_IP_PORT.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 if not touched_session.user:
                     touched_session.user = m.group("user")
@@ -375,8 +389,8 @@ def parse_log(path: Path) -> List[Session]:
                             break
 
                 if candidate is None:
-                    candidate = get_or_create_session(
-                        sessions_by_key, sessions_in_order, ip, "unknown"
+                    candidate = get_active_session(
+                        active_sessions_by_key, sessions_in_order, ip, "unknown"
                     )
 
                 touched_session = candidate
@@ -386,8 +400,8 @@ def parse_log(path: Path) -> List[Session]:
             # Fehlgeschlagene Anmeldung
             m = RE_AUTH_FAILED.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 touched_session.user = m.group("user")
                 touched_session.auth_result = "failed"
@@ -396,16 +410,16 @@ def parse_log(path: Path) -> List[Session]:
             # Connection reset
             m = RE_CONN_RESET.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 set_end_reason(touched_session, "connection_reset")
 
             # SIGUSR1
             m = RE_SIGUSR1.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 reason = m.group("reason").replace("-", "_")
                 if touched_session.end_reason == "unknown":
@@ -415,32 +429,32 @@ def parse_log(path: Path) -> List[Session]:
             # Timeout
             m = RE_INACTIVITY.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 set_end_reason(touched_session, "timeout")
 
             # Expliziter Disconnect
             m = RE_EXPLICIT_EXIT.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 set_end_reason(touched_session, "client_disconnect")
 
             # TLS Error
             m = RE_TLS_ERROR.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 set_end_reason(touched_session, "tls_error")
 
             # Bad encapsulated packet length
             m = RE_BAD_PACKET_LENGTH.search(rest)
             if m:
-                touched_session = get_or_create_session(
-                    sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                touched_session = get_active_session(
+                    active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 set_end_reason(touched_session, "bad_packet_length")
 
@@ -448,8 +462,8 @@ def parse_log(path: Path) -> List[Session]:
             if touched_session is None:
                 m = RE_IP_PORT_AT_START.match(rest)
                 if m:
-                    touched_session = get_or_create_session(
-                        sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
+                    touched_session = get_active_session(
+                        active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                     )
 
             if touched_session:
