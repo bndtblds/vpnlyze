@@ -409,9 +409,7 @@ def parse_log(path: Path, store_lines: bool = True) -> List[Session]:
                         break
 
                 if candidate is None:
-                    candidate = get_active_session(
-                        active_sessions_by_key, sessions_in_order, ip, "unknown"
-                    )
+                    candidate = create_session(sessions_in_order, ip, "unknown")
 
                 touched_session = candidate
                 touched_session.user = user

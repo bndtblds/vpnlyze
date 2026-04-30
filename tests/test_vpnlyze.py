@@ -65,6 +65,18 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(sessions[1].auth_result, "unknown")
         self.assertEqual(sessions[2].auth_result, "success")
 
+    def test_unmatched_connection_started_creates_separate_unknown_sessions(self):
+        sessions = parse_lines(
+            [
+                '2026:04:30-10:00:00 host openvpn[1]: event="Connection started" username="testuser1" srcip="192.0.2.1"',
+                '2026:04:30-10:01:00 host openvpn[1]: event="Connection started" username="testuser2" srcip="192.0.2.1"',
+            ]
+        )
+
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual([s.user for s in sessions], ["testuser1", "testuser2"])
+        self.assertEqual([s.key for s in sessions], ["192.0.2.1:unknown", "192.0.2.1:unknown"])
+
     def test_sigusr1_respects_priority_system(self):
         sessions = parse_lines(
             [
