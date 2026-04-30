@@ -113,6 +113,18 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
 
+    def test_find_sessions_by_key_returns_all_matches(self):
+        sessions = parse_lines(
+            [
+                "2026:04:30-10:00:00 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.1:5000",
+                "2026:04:30-10:01:00 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.1:5000",
+            ]
+        )
+
+        matches = vpnlyze.find_sessions_by_key(sessions, "192.0.2.1:5000")
+
+        self.assertEqual([s.session_id for s in matches], [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

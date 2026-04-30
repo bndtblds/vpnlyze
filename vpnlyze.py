@@ -607,6 +607,11 @@ def find_session(
     return None
 
 
+def find_sessions_by_key(sessions: List[Session], key: str) -> List[Session]:
+    """Sucht alle Sessions mit einem IP:Port-Key."""
+    return [s for s in sessions if s.key == key]
+
+
 # ============================================================================
 # CLI: Argument Parser und Hilfe
 # ============================================================================
@@ -757,7 +762,22 @@ def main() -> int:
         return 0
 
     if args.command == "session":
-        sess = find_session(sessions, session_id=args.id, key=args.key)
+        sess = None
+        if args.key:
+            matches = find_sessions_by_key(sessions, args.key)
+            if len(matches) > 1:
+                ids = ", ".join(str(s.session_id) for s in matches)
+                print(
+                    f"Session-Key ist mehrdeutig: {args.key} "
+                    f"(Session-IDs: {ids}). Bitte --id verwenden.",
+                    file=sys.stderr,
+                )
+                return 2
+            if len(matches) == 1:
+                sess = matches[0]
+        else:
+            sess = find_session(sessions, session_id=args.id)
+
         if not sess:
             print("Session nicht gefunden.", file=sys.stderr)
             return 2
