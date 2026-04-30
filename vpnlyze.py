@@ -160,7 +160,7 @@ RE_BAD_PACKET_LENGTH = re.compile(
 # ============================================================================
 
 def make_key(ip: str, port: str) -> str:
-    """Erstellt eindeutigen Session-Schlüssel aus IP:Port."""
+    """Erstellt den IP:Port-Anzeigeschlüssel einer Verbindung."""
     return f"{ip}:{port}"
 
 
@@ -594,28 +594,20 @@ def print_session(session: Session) -> None:
 
 def find_session(
     sessions: List[Session],
-    session_id: Optional[int] = None,
-    key: Optional[str] = None,
+    session_id: int,
 ) -> Optional[Session]:
-    """Sucht spezifische Session nach ID oder IP:Port Key.
+    """Sucht eine spezifische Session nach eindeutiger Session-ID.
     
     Args:
         sessions: Liste von Session-Objekten
         session_id: Session-ID (von summary Command)
-        key: IP:PORT String (z.B. "192.0.2.1:5000")
     
     Returns:
         Session-Objekt oder None wenn nicht gefunden
     """
-    if session_id is not None:
-        for s in sessions:
-            if s.session_id == session_id:
-                return s
-
-    if key is not None:
-        for s in sessions:
-            if s.key == key:
-                return s
+    for s in sessions:
+        if s.session_id == session_id:
+            return s
 
     return None
 
@@ -789,7 +781,7 @@ def main() -> int:
             if len(matches) == 1:
                 sess = matches[0]
         else:
-            sess = find_session(sessions, session_id=args.id)
+            sess = find_session(sessions, args.id)
 
         if not sess:
             print("Session nicht gefunden.", file=sys.stderr)
@@ -800,7 +792,7 @@ def main() -> int:
             store_lines=True,
             store_session_ids={sess.session_id},
         )
-        sess = find_session(detail_sessions, session_id=sess.session_id)
+        sess = find_session(detail_sessions, sess.session_id)
         if not sess:
             print("Session nicht gefunden.", file=sys.stderr)
             return 2
