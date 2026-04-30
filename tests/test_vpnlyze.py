@@ -19,6 +19,18 @@ def parse_lines(lines, store_lines=True):
         path.unlink(missing_ok=True)
 
 
+def parse_lines_from_file(lines, **kwargs):
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
+        tmp.write("\n".join(lines))
+        tmp.write("\n")
+        path = Path(tmp.name)
+
+    try:
+        return vpnlyze.parse_log(path, **kwargs)
+    finally:
+        path.unlink(missing_ok=True)
+
+
 class ParserTests(unittest.TestCase):
     def test_reused_ip_port_creates_new_sessions(self):
         sessions = parse_lines(
@@ -119,6 +131,21 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(sessions[0].lines, [])
         self.assertEqual(sessions[0].start_ts, "2026:04:30-10:00:00")
         self.assertEqual(sessions[0].end_ts, "2026:04:30-10:00:01")
+
+    def test_can_store_lines_for_only_one_session(self):
+        sessions = parse_lines_from_file(
+            [
+                "2026:04:30-10:00:00 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.1:5000",
+                "2026:04:30-10:00:01 host openvpn[1]: 192.0.2.1:5000 Connection reset, restarting",
+                "2026:04:30-10:01:00 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.2:5001",
+                "2026:04:30-10:01:01 host openvpn[1]: 192.0.2.2:5001 Connection reset, restarting",
+            ],
+            store_lines=True,
+            store_session_ids={2},
+        )
+
+        self.assertEqual(sessions[0].lines, [])
+        self.assertEqual(len(sessions[1].lines), 2)
 
 
 class CliTests(unittest.TestCase):

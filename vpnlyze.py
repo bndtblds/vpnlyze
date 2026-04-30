@@ -29,7 +29,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 
 __author__ = "bndtblds"
@@ -323,7 +323,11 @@ def calculate_duration(start_ts: Optional[str], end_ts: Optional[str]) -> str:
 # LOG PARSER: Hauptanalyse-Funktion
 # ============================================================================
 
-def parse_log(path: Path, store_lines: bool = True) -> List[Session]:
+def parse_log(
+    path: Path,
+    store_lines: bool = True,
+    store_session_ids: Optional[Set[int]] = None,
+) -> List[Session]:
     """Parst OpenVPN Syslog-Datei und extrahiert alle Sessions.
     
     Liest Logdatei zeilenweise, erkennt OpenVPN-Events per Regex,
@@ -332,6 +336,7 @@ def parse_log(path: Path, store_lines: bool = True) -> List[Session]:
     Args:
         path: Pfad zur openvpn.log Datei
         store_lines: Original-Logzeilen in Session-Objekten speichern
+        store_session_ids: Optional nur diese Session-IDs mit Zeilen befüllen
     
     Returns:
         Liste von Session-Objekten sortiert nach Entdeckungs-Reihenfolge
@@ -491,7 +496,11 @@ def parse_log(path: Path, store_lines: bool = True) -> List[Session]:
                     )
 
             if touched_session:
-                attach_line(touched_session, line, ts, line_no, store_line=store_lines)
+                should_store_line = store_lines and (
+                    store_session_ids is None
+                    or touched_session.session_id in store_session_ids
+                )
+                attach_line(touched_session, line, ts, line_no, store_line=should_store_line)
 
     return sessions_in_order
 
@@ -755,7 +764,7 @@ def main() -> int:
         print(f"Datei nicht gefunden: {log_path}", file=sys.stderr)
         return 1
 
-    sessions = parse_log(log_path, store_lines=args.command == "session")
+    sessions = parse_log(log_path, store_lines=False)
 
     if args.command == "summary":
         print_summary(
@@ -782,6 +791,16 @@ def main() -> int:
         else:
             sess = find_session(sessions, session_id=args.id)
 
+        if not sess:
+            print("Session nicht gefunden.", file=sys.stderr)
+            return 2
+
+        detail_sessions = parse_log(
+            log_path,
+            store_lines=True,
+            store_session_ids={sess.session_id},
+        )
+        sess = find_session(detail_sessions, session_id=sess.session_id)
         if not sess:
             print("Session nicht gefunden.", file=sys.stderr)
             return 2
