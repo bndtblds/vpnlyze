@@ -212,7 +212,13 @@ def is_pending_login_candidate(session: Session, ip: str, user: str) -> bool:
     return session.user is None or session.user.lower() == user.lower()
 
 
-def attach_line(session: Session, line: str, ts: str, line_no: int) -> None:
+def attach_line(
+    session: Session,
+    line: str,
+    ts: str,
+    line_no: int,
+    store_line: bool = True,
+) -> None:
     """Fügt Logzeile zu Session hinzu und aktualisiert Timestamps.
     
     Args:
@@ -220,13 +226,15 @@ def attach_line(session: Session, line: str, ts: str, line_no: int) -> None:
         line: Original-Logzeile
         ts: Timestamp aus Logzeile
         line_no: Zeilennummer in Datei
+        store_line: Originalzeile speichern (für Detailansicht/Export)
     """
     if session.start_ts is None:
         session.start_ts = ts
         session.start_line_no = line_no
     session.end_ts = ts
     session.end_line_no = line_no
-    session.lines.append(line)
+    if store_line:
+        session.lines.append(line)
 
 
 def set_end_reason(session: Session, reason: str, details: Optional[str] = None) -> None:
@@ -252,9 +260,12 @@ def set_end_reason(session: Session, reason: str, details: Optional[str] = None)
     priority = {
         "unknown": 0,
         "connection_reset": 1,
+        "sigusr1_connection_reset": 1,
         "client_disconnect": 2,
         "timeout": 3,
+        "sigusr1_ping_restart": 3,
         "tls_error": 4,
+        "sigusr1_tls_error": 4,
         "bad_packet_length": 5,
         "auth_failed": 6,
     }
@@ -308,7 +319,7 @@ def calculate_duration(start_ts: Optional[str], end_ts: Optional[str]) -> str:
 # LOG PARSER: Hauptanalyse-Funktion
 # ============================================================================
 
-def parse_log(path: Path) -> List[Session]:
+def parse_log(path: Path, store_lines: bool = True) -> List[Session]:
     """Parst OpenVPN Syslog-Datei und extrahiert alle Sessions.
     
     Liest Logdatei zeilenweise, erkennt OpenVPN-Events per Regex,
@@ -316,6 +327,7 @@ def parse_log(path: Path) -> List[Session]:
     
     Args:
         path: Pfad zur openvpn.log Datei
+        store_lines: Original-Logzeilen in Session-Objekten speichern
     
     Returns:
         Liste von Session-Objekten sortiert nach Entdeckungs-Reihenfolge
@@ -430,9 +442,11 @@ def parse_log(path: Path) -> List[Session]:
                     active_sessions_by_key, sessions_in_order, m.group("ip"), m.group("port")
                 )
                 reason = m.group("reason").replace("-", "_")
-                if touched_session.end_reason == "unknown":
-                    touched_session.end_reason = f"sigusr1_{reason}"
-                    touched_session.end_details = m.group("reason")
+                set_end_reason(
+                    touched_session,
+                    f"sigusr1_{reason}",
+                    details=m.group("reason"),
+                )
 
             # Timeout
             m = RE_INACTIVITY.search(rest)
@@ -475,7 +489,7 @@ def parse_log(path: Path) -> List[Session]:
                     )
 
             if touched_session:
-                attach_line(touched_session, line, ts, line_no)
+                attach_line(touched_session, line, ts, line_no, store_line=store_lines)
 
     return sessions_in_order
 
@@ -734,7 +748,7 @@ def main() -> int:
         print(f"Datei nicht gefunden: {log_path}", file=sys.stderr)
         return 1
 
-    sessions = parse_log(log_path)
+    sessions = parse_log(log_path, store_lines=args.command == "session")
 
     if args.command == "summary":
         print_summary(
