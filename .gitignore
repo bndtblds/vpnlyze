@@ -15,6 +15,12 @@ env/
 # Local AI working context
 ai-context/context.md
 
+# Private real-world test logs
+testdaten/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+# AI Context (privates Repo: ../ai-context/)
+ai-context/context.md
