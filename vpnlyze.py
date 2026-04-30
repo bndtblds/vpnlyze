@@ -46,7 +46,7 @@ class Session:
     
     Attribute:
         session_id: Eindeutige Nummer (Reihenfolge der Entdeckung)
-        key: IP:PORT Kombination als eindeutiger Identifikator
+        key: IP:PORT Kombination der Verbindung (nicht global eindeutig)
         ip: Client IP-Adresse
         port: Client Port
         user: Benutzername der Session

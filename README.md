@@ -9,6 +9,7 @@ VPNlyze ist ein kleines Python-CLI zur Analyse von OpenVPN-Serverlogs im Syslog-
 - Erfolgreiche und fehlgeschlagene Authentifizierungen unterscheiden
 - Beendigungsgrunde wie Timeout, `AUTH_FAILED`, Reset oder TLS-Fehler erkennen
 - Einzelne Sessions komplett inspizieren oder in eine Datei exportieren
+- Wiederverwendete Client-Ports als getrennte Sessions behandeln
 - Keine Abhangigkeiten, nur Python-Standardbibliothek
 
 ---
@@ -111,6 +112,10 @@ Nach IP:Port:
 vpnlyze /var/log/openvpn.log session --key 192.0.2.1:5000
 ```
 
+Hinweis: `IP:Port` ist nicht garantiert eindeutig, weil Clients Source-Ports
+spaeter erneut verwenden koennen. Fuer genaue Detailansichten ist die
+Session-ID aus `summary` vorzuziehen.
+
 ### 5. Session in Datei exportieren
 
 ```bash
@@ -157,11 +162,11 @@ vpnlyze /var/log/openvpn.log session --id 1 --output session_1.log
 Das Projekt bleibt bewusst einfach:
 
 1. **Parse-Phase** – Liest Logdatei zeilenweise, matched gegen Regex-Patterns
-2. **Session-Aggregation** – Gruppiert Zeilen nach IP:Port in Session-Objekte
+2. **Session-Aggregation** – Jede TCP-Verbindung startet eine neue Session; Folgezeilen werden der aktuell aktiven Session fuer `IP:Port` zugeordnet
 3. **Daten-Bereicherung** – Extrahiert User, CN, Auth-Result, End-Reason
 4. **Ausgabe-Phase** – Formatiert Daten als Tabelle oder Detail-View
 
-Es gibt keine Datenbank, keinen Cache und keine externen Pakete. Alles lauft in-memory auf einer Liste von Session-Objekten.
+Es gibt keine Datenbank, keinen Cache und keine externen Pakete. Alles lauft in-memory auf einer Liste von Session-Objekten. Die Summary-Ausgabe speichert keine Original-Logzeilen; Detailansicht und Export laden sie bei Bedarf.
 
 ---
 
@@ -236,7 +241,9 @@ vpnlyze.py
 ├── Regex Patterns (RE_*)
 ├── Hilfsfunktionen
 │   ├── make_key()
-│   ├── get_or_create_session()
+│   ├── create_session()
+│   ├── get_active_session()
+│   ├── is_pending_login_candidate()
 │   ├── attach_line()
 │   ├── set_end_reason() (mit Prioritäts-System)
 │   └── calculate_duration()
