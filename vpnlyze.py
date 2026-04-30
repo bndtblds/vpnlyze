@@ -403,7 +403,7 @@ def parse_log(path: Path, store_lines: bool = True) -> List[Session]:
                 user = m.group("user")
 
                 candidate = None
-                for sess in reversed(list(active_sessions_by_key.values())):
+                for sess in reversed(sessions_in_order):
                     if is_pending_login_candidate(sess, ip, user):
                         candidate = sess
                         break

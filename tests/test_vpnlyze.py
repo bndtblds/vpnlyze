@@ -48,6 +48,23 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(sessions[0].auth_result, "unknown")
         self.assertEqual(sessions[1].auth_result, "success")
 
+    def test_connection_started_uses_latest_session_after_port_reuse(self):
+        sessions = parse_lines(
+            [
+                "2026:04:30-10:00:00 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.1:5000",
+                "2026:04:30-10:00:01 host openvpn[1]: 192.0.2.1:5000 Username/Password authentication deferred for username 'testuser1'",
+                "2026:04:30-10:00:02 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.1:5001",
+                "2026:04:30-10:00:03 host openvpn[1]: 192.0.2.1:5001 Username/Password authentication deferred for username 'testuser1'",
+                "2026:04:30-10:00:04 host openvpn[1]: TCP connection established with [AF_INET]192.0.2.1:5000",
+                "2026:04:30-10:00:05 host openvpn[1]: 192.0.2.1:5000 Username/Password authentication deferred for username 'testuser1'",
+                '2026:04:30-10:00:06 host openvpn[1]: event="Connection started" username="testuser1" srcip="192.0.2.1"',
+            ]
+        )
+
+        self.assertEqual(sessions[0].auth_result, "unknown")
+        self.assertEqual(sessions[1].auth_result, "unknown")
+        self.assertEqual(sessions[2].auth_result, "success")
+
     def test_sigusr1_respects_priority_system(self):
         sessions = parse_lines(
             [
