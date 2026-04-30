@@ -203,6 +203,15 @@ def get_active_session(
     return active_sessions_by_key[key]
 
 
+def is_pending_login_candidate(session: Session, ip: str, user: str) -> bool:
+    """Prüft, ob eine Session für ein portloses Login-Event plausibel ist."""
+    if session.ip != ip:
+        return False
+    if session.auth_result == "success" or session.end_reason != "unknown":
+        return False
+    return session.user is None or session.user.lower() == user.lower()
+
+
 def attach_line(session: Session, line: str, ts: str, line_no: int) -> None:
     """Fügt Logzeile zu Session hinzu und aktualisiert Timestamps.
     
@@ -382,11 +391,10 @@ def parse_log(path: Path) -> List[Session]:
                 user = m.group("user")
 
                 candidate = None
-                for sess in reversed(sessions_in_order):
-                    if sess.ip == ip and sess.auth_result != "success":
-                        if sess.user is None or sess.user.lower() == user.lower():
-                            candidate = sess
-                            break
+                for sess in reversed(list(active_sessions_by_key.values())):
+                    if is_pending_login_candidate(sess, ip, user):
+                        candidate = sess
+                        break
 
                 if candidate is None:
                     candidate = get_active_session(
@@ -606,11 +614,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("-h", "--help", action="help", help="Diese Hilfe anzeigen")
     parser.add_argument(
         "logfile",
-        nargs="?",
         help="Pfad zur OpenVPN Logdatei (z.B. /var/log/openvpn.log)"
     )
 
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     # summary Command
     p_summary = subparsers.add_parser(
